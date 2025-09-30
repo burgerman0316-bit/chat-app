@@ -1,57 +1,61 @@
 const socket = io();
-
 const messagesContainer = document.getElementById("messages");
-const form = document.getElementById("form");
-const input = document.getElementById("input");
-const loginBtn = document.getElementById("loginBtn");
-
 let currentUser = null;
 
-// Google Login
-loginBtn.onclick = () => {
-  google.accounts.id.initialize({
-    client_id: "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com",
-    callback: handleCredentialResponse
-  });
-  google.accounts.id.prompt();
-};
-
+// Google login callback
 function handleCredentialResponse(response) {
-  const data = parseJwt(response.credential);
+  const base64Url = response.credential.split('.')[1];
+  const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+  const payload = JSON.parse(atob(base64));
+
   currentUser = {
-    name: data.name,
-    email: data.email,
-    picture: data.picture
+    name: payload.name,
+    email: payload.email,
+    picture: payload.picture
   };
-  loginBtn.style.display = "none"; // hide login button
+
+  alert("Welcome " + currentUser.name);
 }
 
-// Decode JWT token
-function parseJwt(token) {
-  const base64Url = token.split(".")[1];
-  const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
-  const jsonPayload = decodeURIComponent(
-    atob(base64).split("").map(c =>
-      "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2)
-    ).join("")
-  );
-  return JSON.parse(jsonPayload);
+// Send a message
+function sendMessage() {
+  if (!currentUser) {
+    alert("Please sign in with Google first.");
+    return;
+  }
+
+  const input = document.getElementById("messageInput");
+  const text = input.value.trim();
+  if (text === "") return;
+
+  const messageData = {
+    username: currentUser.name,
+    picture: currentUser.picture,
+    content: text,
+    timestamp: new Date()
+  };
+
+  socket.emit("chat message", messageData);
+  input.value = "";
 }
 
 // Add message to chat
-function addMessage(username, content, timestamp, picture, isOwn = false) {
-  const msgEl = document.createElement("div");
-  msgEl.className = `message ${isOwn ? "own" : ""}`;
+function addMessage(username, content, timestamp, picture) {
+  const messageElement = document.createElement("div");
+  messageElement.className = "message";
 
   if (picture) {
     const img = document.createElement("img");
     img.src = picture;
     img.alt = username;
-    msgEl.appendChild(img);
+    img.style.width = "32px";
+    img.style.height = "32px";
+    img.style.borderRadius = "50%";
+    img.style.marginRight = "8px";
+    messageElement.appendChild(img);
   }
 
   const contentWrapper = document.createElement("div");
-  contentWrapper.className = "content";
 
   const header = document.createElement("div");
   header.className = "message-header";
@@ -59,41 +63,23 @@ function addMessage(username, content, timestamp, picture, isOwn = false) {
   header.textContent = `${username} - ${time.toLocaleTimeString()}`;
 
   const body = document.createElement("div");
+  body.className = "message-content";
   body.textContent = content;
 
   contentWrapper.appendChild(header);
   contentWrapper.appendChild(body);
+  messageElement.appendChild(contentWrapper);
 
-  msgEl.appendChild(contentWrapper);
-  messagesContainer.appendChild(msgEl);
-
+  messagesContainer.appendChild(messageElement);
   messagesContainer.scrollTop = messagesContainer.scrollHeight;
 }
 
-// Send message
-form.addEventListener("submit", (e) => {
-  e.preventDefault();
-  if (input.value && currentUser) {
-    const messageData = {
-      username: currentUser.name,
-      picture: currentUser.picture,
-      content: input.value,
-      timestamp: new Date()
-    };
-    socket.emit("chat message", messageData);
-    input.value = "";
-  }
+// Listen for chat events
+socket.on("chat history", (msgs) => {
+  messagesContainer.innerHTML = "";
+  msgs.forEach(m => addMessage(m.username, m.content, m.timestamp, m.picture));
 });
 
-// Receive old messages
-socket.on("chat history", (history) => {
-  history.forEach(msg =>
-    addMessage(msg.username, msg.content, msg.timestamp, msg.picture)
-  );
-});
-
-// Receive new message
 socket.on("chat message", (msg) => {
-  const isOwn = currentUser && msg.username === currentUser.name;
-  addMessage(msg.username, msg.content, msg.timestamp, msg.picture, isOwn);
+  addMessage(msg.username, msg.content, msg.timestamp, msg.picture);
 });
